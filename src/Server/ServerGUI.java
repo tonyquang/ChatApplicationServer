@@ -25,6 +25,7 @@ import javax.swing.table.DefaultTableModel;
 import Models.ConectionJDBC;
 import Models.Register;
 import java.io.File;
+import java.io.FileInputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import javax.swing.ImageIcon;
@@ -155,27 +156,29 @@ public class ServerGUI extends javax.swing.JFrame {
                 while (true) {
                     objClient = (ObjectClients) oin.readObject();
                     String action = objClient.getStatus();
+                    String userNameSend = objClient.getUserNameSend();//User của luồng gửi tới
+                    String userNameRecv = objClient.getUserNameRecv();// User của luồng sẽ nhận được thông điệp
 
                     switch (action) {
                         case "register": {
                             txt_serverLog.append("\nClient Register...");
-                            Register reg = new Register(objClient.getUserNameSend(), objClient.getPassWord(), objClient.getFullName(), objClient.getAvatar());
+                            Register reg = new Register(userNameSend, objClient.getPassWord(), objClient.getFullName(), objClient.getAvatar());
                             String rs = reg.registerClient();
                             ObjectClients rep = new ObjectClients();
                             rep.setStatus(rs);
                             oout.writeObject(rep);
                             loadClients(conn);
                             if (rs.equals("success")) {
-                                txt_serverLog.append("\n" + objClient.getUserNameSend() + " registered success!!!");
+                                txt_serverLog.append("\n" + userNameSend + " registered success!!!");
                             }
                             break;
                         }
                         case "login": {
-                            boolean rs = checkLogin(oout, objClient.getUserNameSend(), objClient.getPassWord());
+                            boolean rs = checkLogin(oout, userNameSend, objClient.getPassWord());
                             ObjectClients repLogin = new ObjectClients();
                             if (rs) {
-                                txt_serverLog.append("\n" + objClient.getUserNameSend() + " login success!!!");
-                                listClientsOutputStream.put(objClient.getUserNameSend(), this.oout);
+                                txt_serverLog.append("\n" + userNameSend + " login success!!!");
+                                listClientsOutputStream.put(userNameSend, this.oout);
                                 repLogin.setStatus("resLogin");
                                 repLogin.setMessage("success");
                             } else {
@@ -183,30 +186,43 @@ public class ServerGUI extends javax.swing.JFrame {
                                 repLogin.setMessage("fail");
                             }
                             oout.writeObject(repLogin);
-                            //Cải thiện tốc độ login cho client
+                            // Cải thiện tốc độ login cho client
                             // Thay vì chờ nói hết cho mọi người rằng tôi online thì
                             // Hiện login cho client trước còn phía server sẽ tự thông báo cho mọi người sau
-                            if(rs)
-                                TellEveryOneMyStatus(objClient.getUserNameSend(), "Online");
+                            if (rs) {
+                                TellEveryOneMyStatus(userNameSend, "Online");
+                            }
                             break;
                         }
                         case "addfriend": {
                             //getUserNameSend là user name của bạn
                             //getUserNameRecv là user name người bạn muốn kết bạn
-                            Boolean rsAddFriend = addNewFriends(objClient.getUserNameSend(), objClient.getUserNameRecv());
+                            Boolean rsAddFriend = addNewFriends(userNameSend, userNameRecv);
                             ObjectClients infoNewFriend = null;
                             if (rsAddFriend) {
-                                infoNewFriend = getInfoClient(objClient.getUserNameRecv(), "resAddfriends");
+                                infoNewFriend = getInfoClient(userNameRecv, "resAddfriends");
                                 infoNewFriend.setMessage("success");
                                 //sau khi kết bạn thành công tự động thêm mình vào danh sách 
                                 //bạn bè của người kết bạn khi họ online
-                                pushMeToFriendList(objClient.getUserNameRecv(), objClient.getUserNameSend());
+                                pushMeToFriendList(userNameRecv, userNameSend);
                             } else {
                                 infoNewFriend = new ObjectClients();
                                 infoNewFriend.setStatus("resAddfriends");
                                 infoNewFriend.setMessage("fail");
                             }
                             oout.writeObject(infoNewFriend);
+                            break;
+                        }
+                        case "getMess": {
+                            int groupID = getGroupID(userNameSend, userNameRecv);
+                            if (groupID != -1) {
+                                ArrayList<ObjectClients> listMess = getMess(groupID);
+                                for(ObjectClients mess : listMess)
+                                {
+                                    oout.writeObject(mess);
+                                    oout.flush();
+                                }
+                            }
                             break;
                         }
                     }
@@ -230,6 +246,83 @@ public class ServerGUI extends javax.swing.JFrame {
             }
         }
 
+    }
+
+    public ArrayList<ObjectClients> getMess(int groupID) {
+        ArrayList<ObjectClients> listMess = new ArrayList<>();
+        try {
+            String query = "SELECT TOP 30 * FROM dbo.Message WHERE group_id = " + groupID + " ORDER BY ID ASC";
+            Statement stmt = conn.createStatement();
+            ResultSet rs = stmt.executeQuery(query);
+            while(rs.next())
+            {
+                ObjectClients objMess = new ObjectClients();
+                objMess.setStatus("resMess");
+                objMess.setUserNameRecv(rs.getString("sender_id"));
+                String mess = rs.getString("message");
+                String sign = Character.toString(mess.charAt(0));
+                objMess.setMessage(mess);
+                if(sign.equals("F") || sign.equals("P"))
+                {
+                    byte[] f = readBytesFromFile(mess.substring(1, mess.length()));
+                    objMess.setFile(f);
+                }
+                listMess.add(objMess);
+            }
+        } catch (SQLException ex) {
+            Logger.getLogger(ServerGUI.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        return listMess;
+    }
+
+    //Đọc file to byte
+    public  byte[] readBytesFromFile(String filePath) {
+
+        FileInputStream fileInputStream = null;
+        byte[] bytesArray = null;
+
+        try {
+
+            File file = new File(filePath);
+            bytesArray = new byte[(int) file.length()];
+
+            //read file into bytes[]
+            fileInputStream = new FileInputStream(file);
+            fileInputStream.read(bytesArray);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            if (fileInputStream != null) {
+                try {
+                    fileInputStream.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+
+        }
+
+        return bytesArray;
+
+    }
+        
+    
+    //Lấy group id của hai người nếu là bạn, còn không sẽ trả về -1
+    public int getGroupID(String user_1, String user_2) {
+        String query = "SELECT ID FROM dbo.[GROUP] WHERE user_1 = '" + user_1 + "' AND user_2 = '" + user_2 + "' "
+                + "UNION ALL "
+                + "SELECT ID FROM dbo.[GROUP] WHERE user_1 = '" + user_2 + "' AND user_2 = '" + user_1 + "'";
+        try {
+            Statement stmt = conn.createStatement();
+            ResultSet rs = stmt.executeQuery(query);
+            if (rs.next()) {
+                return rs.getInt("ID");
+            }
+        } catch (SQLException ex) {
+            ex.printStackTrace();
+        }
+        return -1;
     }
 
     public void pushMeToFriendList(String userNameFriend, String userName) {
