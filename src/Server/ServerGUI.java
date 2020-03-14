@@ -217,11 +217,17 @@ public class ServerGUI extends javax.swing.JFrame {
                             int groupID = getGroupID(userNameSend, userNameRecv);
                             if (groupID != -1) {
                                 ArrayList<ObjectClients> listMess = getMess(groupID);
-                                for(ObjectClients mess : listMess)
-                                {
+                                for (ObjectClients mess : listMess) {
                                     oout.writeObject(mess);
                                     oout.flush();
                                 }
+                            }
+                            break;
+                        }
+                        case "chat": {
+                            int groupID = getGroupID(userNameSend, userNameRecv);
+                            if (groupID != -1) {
+                               inserChat(objClient, groupID);
                             }
                             break;
                         }
@@ -248,23 +254,61 @@ public class ServerGUI extends javax.swing.JFrame {
 
     }
 
+    //new chat
+    public boolean inserChat(ObjectClients objMess, int groupID) {
+        String Mess = objMess.getMessage();
+        String kind = Character.toString(Mess.charAt(0));
+
+        String userNameSend = objMess.getUserNameSend();
+        String userNameRecv = objMess.getUserNameRecv();
+
+        ObjectClients objResMess = new ObjectClients();
+        objResMess.setStatus("newMess");
+        objResMess.setMessage(Mess);
+        objResMess.setUserNameRecv(userNameSend);
+
+        String query = "INSERT INTO dbo.Message VALUES  ( '" + userNameSend + "'," + groupID + ",N'" + Mess + "')";
+        try {
+            Statement stm = conn.createStatement();
+            stm.execute(query);
+        } catch (SQLException ex) {
+            Logger.getLogger(ServerGUI.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        
+        
+        if (listClientsOutputStream.containsKey(userNameRecv)) {
+            ObjectOutputStream ooutPushMess = listClientsOutputStream.get(userNameRecv);
+            if (kind.equals("F") || kind.equals("P")) {
+                byte[] f = readBytesFromFile(Mess.substring(1));
+                objMess.setFile(f);
+            }
+            try {
+                ooutPushMess.writeObject(objResMess);
+                ooutPushMess.flush();
+            } catch (IOException ex) {
+                ex.printStackTrace();
+            }
+        }
+
+        return true;
+    }
+
+    //Get danh sách mess từ yêu cầu của client
     public ArrayList<ObjectClients> getMess(int groupID) {
         ArrayList<ObjectClients> listMess = new ArrayList<>();
         try {
-            String query = "SELECT TOP 30 * FROM dbo.Message WHERE group_id = " + groupID + " ORDER BY ID ASC";
+            String query = "SELECT * FROM (SELECT TOP(30) * FROM dbo.Message WHERE group_id = "+groupID+" ORDER BY ID DESC) AS s ORDER BY s.ID ASC";
             Statement stmt = conn.createStatement();
             ResultSet rs = stmt.executeQuery(query);
-            while(rs.next())
-            {
+            while (rs.next()) {
                 ObjectClients objMess = new ObjectClients();
                 objMess.setStatus("resMess");
                 objMess.setUserNameRecv(rs.getString("sender_id"));
-                String mess = rs.getString("message");
+                String mess = rs.getNString("message");
                 String sign = Character.toString(mess.charAt(0));
                 objMess.setMessage(mess);
-                if(sign.equals("F") || sign.equals("P"))
-                {
-                    byte[] f = readBytesFromFile(mess.substring(1, mess.length()));
+                if (sign.equals("F") || sign.equals("P")) {
+                    byte[] f = readBytesFromFile(mess.substring(1));
                     objMess.setFile(f);
                 }
                 listMess.add(objMess);
@@ -276,7 +320,7 @@ public class ServerGUI extends javax.swing.JFrame {
     }
 
     //Đọc file to byte
-    public  byte[] readBytesFromFile(String filePath) {
+    public byte[] readBytesFromFile(String filePath) {
 
         FileInputStream fileInputStream = null;
         byte[] bytesArray = null;
@@ -306,8 +350,7 @@ public class ServerGUI extends javax.swing.JFrame {
         return bytesArray;
 
     }
-        
-    
+
     //Lấy group id của hai người nếu là bạn, còn không sẽ trả về -1
     public int getGroupID(String user_1, String user_2) {
         String query = "SELECT ID FROM dbo.[GROUP] WHERE user_1 = '" + user_1 + "' AND user_2 = '" + user_2 + "' "
@@ -697,6 +740,7 @@ public class ServerGUI extends javax.swing.JFrame {
         }
     }//GEN-LAST:event_label_deleteMouseClicked
 
+    //Xử lý client login
     public boolean checkLogin(ObjectOutputStream oos, String userName, String passWord) {
         String query = "SELECT * FROM dbo.[USER] WHERE userName = '" + userName + "' AND passWord = '" + passWord + "'";
         String queryOnline = "UPDATE dbo.[USER] SET status = 1 WHERE userName = '" + userName + "'";
@@ -745,12 +789,14 @@ public class ServerGUI extends javax.swing.JFrame {
                 objFriends.setAvatar(imgIcon);
                 oos.writeObject(objFriends);
             }
+
         } catch (SQLException | IOException ex) {
             ex.printStackTrace();
         }
 
     }
 
+    //Xử lý bắt buộc cho tất cả client offline khi server tắt
     public void clientOffline(String userName) {
         try {
             String queryOffline = "UPDATE dbo.[USER] SET status = 0 WHERE userName = '" + userName + "'";
