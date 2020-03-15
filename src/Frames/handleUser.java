@@ -32,6 +32,8 @@ public class handleUser extends javax.swing.JFrame {
 
     public handleUser(ServerGUI serverGUI) {
         initComponents();
+        ConectionJDBC conection = new ConectionJDBC();
+        this.conn = conection.getConnection();
         this.svGUi = serverGUI;
         this.setTitle("Add USER");
     }
@@ -44,8 +46,10 @@ public class handleUser extends javax.swing.JFrame {
         this.userName = userName;
         this.txt_fullName.setText(fullName);
         this.txt_usr.setText(userName);
-
+        this.txt_usr.setEditable(false);
         this.label_register.setIcon(new ImageIcon(getClass().getResource("/Image/btn_editUserNormal.png")));
+        ConectionJDBC conection = new ConectionJDBC();
+        this.conn = conection.getConnection();
     }
 
     @SuppressWarnings("unchecked")
@@ -214,81 +218,98 @@ public class handleUser extends javax.swing.JFrame {
                 img = imgIcon.getImage().getScaledInstance(-1, 100, Image.SCALE_SMOOTH);
             }
             this.imgIcon = new ImageIcon(img);
-            if(jfc.getSelectedFile().getName().length()>25)
+            if (jfc.getSelectedFile().getName().length() > 25) {
                 this.label_imgName.setText(jfc.getSelectedFile().getName().substring(0, 25) + "...");
-            else
+            } else {
                 this.label_imgName.setText(jfc.getSelectedFile().getName());
+            }
         }
     }//GEN-LAST:event_label_chossenImgFileMouseClicked
 
-    private void label_registerMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_label_registerMouseClicked
-        ConectionJDBC connection = new ConectionJDBC();
-        this.conn = connection.getConnection();
-        String userName = txt_usr.getText();
-        String passWord = txt_pwd.getText();
-        String fullName = txt_fullName.getText();
-        String avatarPath = "";
+    public void addUser(String userName, String passWord, String fullName) {
 
         if (checkClient(userName)) {
             JOptionPane.showMessageDialog(null, "Username is already!");
             return;
         }
 
-        Image img = this.imgIcon.getImage();
-
-        BufferedImage bi = new BufferedImage(img.getWidth(null), img.getHeight(null), BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g2 = bi.createGraphics();
-        g2.drawImage(img, 0, 0, null);
-        g2.dispose();
-
-        if (this.imgIcon == null) {
-            avatarPath = "F:\\HOCTAP\\Lap trinh ung dung mang\\ChatAppServer\\AvatarClients\\default\\ava.png";
+        if (userName.equals("") || passWord.equals("") || fullName.equals("") || this.imgIcon == null) {
+            JOptionPane.showMessageDialog(null, "Please fill all of field!");
+            return;
         } else {
-            avatarPath = "F:\\HOCTAP\\Lap trinh ung dung mang\\ChatAppServer\\AvatarClients\\" + userName + ".png";
-            try {
-                ImageIO.write(bi, "png", new File(avatarPath));
-            } catch (IOException ex) {
-                JOptionPane.showMessageDialog(null, "Lưu thất bại");
-            }
-        }
-        String query, res = "";
-        try {
-            if (this.action.equals("addUser")) {
-                if (userName.equals("") || passWord.equals("") || fullName.equals("")) {
-                    JOptionPane.showMessageDialog(null, "Please fill all of field!");
-                    return;
-                }
-                query = "INSERT INTO dbo.[USER] VALUES  ( '" + userName + "' , '" + passWord + ""
-                        + "' , N'" + fullName + "' , N'" + avatarPath + "' , 0,1  )";
-                res = "Add user " + userName + " success!";
+            String avatarPath = "";
+            Image img = this.imgIcon.getImage();
+            BufferedImage bi = new BufferedImage(img.getWidth(null), img.getHeight(null), BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g2 = bi.createGraphics();
+            g2.drawImage(img, 0, 0, null);
+            g2.dispose();
+            if (this.imgIcon == null) {
+                avatarPath = "F:\\HOCTAP\\Lap trinh ung dung mang\\ChatAppServer\\AvatarClients\\default\\ava.png";
             } else {
-                if (userName.equals("") && passWord.equals("") && fullName.equals("") && this.imgIcon == null) {
-                    JOptionPane.showMessageDialog(null, "No field edited!");
-                    return;
-                } else {
-                    if (userName.equals("") || passWord.equals("") || fullName.equals("")) {
-                        JOptionPane.showMessageDialog(null, "Please fill all of field!");
-                        return;
-                    }
-                    if (this.imgIcon != null) {
-                        query = "UPDATE dbo.[USER] SET userName = '" + userName + "', "
-                                + "passWord = '" + passWord + "', name = N'" + fullName + "', avatar = '" + avatarPath + "', status = 1 WHERE userName = '" + this.userName + "'";
-                    } else {
-                        query = "UPDATE dbo.[USER] SET userName = '" + userName + "', "
-                                + "passWord = '" + passWord + "', name = N'" + fullName + "' WHERE userName = '" + this.userName + "'";
-                    }
+                avatarPath = "F:\\HOCTAP\\Lap trinh ung dung mang\\ChatAppServer\\AvatarClients\\" + userName + ".png";
+                try {
+                    ImageIO.write(bi, "png", new File(avatarPath));
+                } catch (IOException ex) {
+                    JOptionPane.showMessageDialog(null, "Lưu thất bại");
                 }
-
-                res = "Update user " + userName + " success!";
             }
+
+            String query = "INSERT INTO dbo.[USER] VALUES  ( '" + userName + "' , '" + passWord + ""
+                    + "' , N'" + fullName + "' , N'" + avatarPath + "' , 0,1  )";
+            exc(query);
+        }
+    }
+
+    public void editUser(String userName, String passWord, String fullName) {
+        if (passWord.equals("") || fullName.equals("")) {
+            JOptionPane.showMessageDialog(null, "Please enter password and full name!");
+            return;
+        } else {
+            String query = "UPDATE dbo.[USER] SET passWord = '" + passWord + "', name = N'" + fullName + "' WHERE userName = '" + userName + "'";
+            if (this.imgIcon != null) {
+                String filePath = "F:\\HOCTAP\\Lap trinh ung dung mang\\ChatAppServer\\AvatarClients\\" + userName + ".png";
+                File f = new File(filePath);
+                f.delete();
+
+                Image img = this.imgIcon.getImage();
+                BufferedImage bi = new BufferedImage(img.getWidth(null), img.getHeight(null), BufferedImage.TYPE_INT_ARGB);
+                Graphics2D g2 = bi.createGraphics();
+                g2.drawImage(img, 0, 0, null);
+                g2.dispose();
+                try {
+                    ImageIO.write(bi, "png", new File(filePath));
+                } catch (IOException ex) {
+                    JOptionPane.showMessageDialog(null, "Lưu thất bại");
+                }
+            }
+            exc(query);
+        }
+    }
+
+    public void exc(String query) {
+        try {
             Statement stm = conn.createStatement();
             stm.execute(query);
-            JOptionPane.showMessageDialog(null, res);
-            svGUi.loadClients(conn);
-            this.setVisible(false);
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(null, "Error: " + e);
         }
+    }
+
+    private void label_registerMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_label_registerMouseClicked
+        String userName = txt_usr.getText();
+        String passWord = txt_pwd.getText();
+        String fullName = txt_fullName.getText();
+        String res = "";
+        if (this.action.equals("addUser")) {
+            addUser(userName, passWord, fullName);
+            res = "Add user " + userName + " success!";
+        } else {
+            editUser(userName, passWord, fullName);
+            res = "Update infomation of user " + userName + " success!";
+        }
+        JOptionPane.showMessageDialog(null, res);
+        svGUi.loadClients(conn);
+        this.setVisible(false);
+
     }//GEN-LAST:event_label_registerMouseClicked
 
     public boolean checkClient(String userName) {

@@ -26,9 +26,15 @@ import Models.ConectionJDBC;
 import Models.Register;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import javax.swing.ImageIcon;
+import javax.swing.UIManager;
+import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.event.TableModelEvent;
 import javax.swing.event.TableModelListener;
 import javax.swing.table.TableModel;
@@ -51,6 +57,12 @@ public class ServerGUI extends javax.swing.JFrame {
     HashMap<String, ObjectOutputStream> listClientsOutputStream = null;
 
     public ServerGUI() {
+        //Reset giao diện java swing
+        try {
+            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+        } catch (ClassNotFoundException | InstantiationException | IllegalAccessException | UnsupportedLookAndFeelException ex) {
+            ex.printStackTrace();
+        }
         initComponents();
 
         table_clientsManagenment.getTableHeader().setFont(new Font("Arial", Font.BOLD, 13));
@@ -217,6 +229,10 @@ public class ServerGUI extends javax.swing.JFrame {
                             int groupID = getGroupID(userNameSend, userNameRecv);
                             if (groupID != -1) {
                                 ArrayList<ObjectClients> listMess = getMess(groupID);
+                                ObjectClients objEnd = new ObjectClients();
+                                objEnd.setStatus("resMess");
+                                objEnd.setMessage("pkg_end");
+                                listMess.add(objEnd);
                                 for (ObjectClients mess : listMess) {
                                     oout.writeObject(mess);
                                     oout.flush();
@@ -227,7 +243,7 @@ public class ServerGUI extends javax.swing.JFrame {
                         case "chat": {
                             int groupID = getGroupID(userNameSend, userNameRecv);
                             if (groupID != -1) {
-                               inserChat(objClient, groupID);
+                                inserChat(objClient, groupID);
                             }
                             break;
                         }
@@ -254,6 +270,17 @@ public class ServerGUI extends javax.swing.JFrame {
 
     }
 
+    public ResultSet exc(String query) {
+        ResultSet rs = null;
+        try {
+            Statement stm = conn.createStatement();
+            rs = stm.executeQuery(query);
+        } catch (Exception e) {
+            return null;
+        }
+        return rs;
+    }
+
     //new chat
     public boolean inserChat(ObjectClients objMess, int groupID) {
         String Mess = objMess.getMessage();
@@ -266,21 +293,41 @@ public class ServerGUI extends javax.swing.JFrame {
         objResMess.setStatus("newMess");
         objResMess.setMessage(Mess);
         objResMess.setUserNameRecv(userNameSend);
-
+        String filePath = "";
         String query = "INSERT INTO dbo.Message VALUES  ( '" + userNameSend + "'," + groupID + ",N'" + Mess + "')";
-        try {
-            Statement stm = conn.createStatement();
-            stm.execute(query);
-        } catch (SQLException ex) {
-            Logger.getLogger(ServerGUI.class.getName()).log(Level.SEVERE, null, ex);
+
+        if (kind.equals("F") || kind.equals("P")) {
+            FileOutputStream out = null;
+            try {
+                byte[] fileMess = objMess.getFile();
+                String fileName = Mess.substring(1);
+                objResMess.setMessage(kind + fileName);
+                fileName = fileName.replaceAll("_", "");
+                String extenstion = fileName.substring(fileName.lastIndexOf(".") + 1);
+                DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+                LocalDateTime now = LocalDateTime.now();
+                String dateTime = (String.valueOf(dtf.format(now))).replaceAll(":", "-");
+                filePath = "F:\\HOCTAP\\Lap trinh ung dung mang\\ChatAppServer\\files\\" + fileName.substring(0, fileName.lastIndexOf(".")) + "_" + dateTime + "." + extenstion;
+                out = new FileOutputStream(filePath);
+
+                query = "INSERT INTO dbo.Message VALUES  ( '" + userNameSend + "'," + groupID + ",N'" + kind + fileName + "_" + filePath + "')";
+                out.write(fileMess);
+            } catch (FileNotFoundException ex) {
+                Logger.getLogger(ServerGUI.class.getName()).log(Level.SEVERE, null, ex);
+            } catch (IOException ex) {
+                Logger.getLogger(ServerGUI.class.getName()).log(Level.SEVERE, null, ex);
+            } finally {
+
+            }
         }
-        
-        
+
+        exc(query);
+
         if (listClientsOutputStream.containsKey(userNameRecv)) {
             ObjectOutputStream ooutPushMess = listClientsOutputStream.get(userNameRecv);
             if (kind.equals("F") || kind.equals("P")) {
-                byte[] f = readBytesFromFile(Mess.substring(1));
-                objMess.setFile(f);
+                byte[] f = objMess.getFile();
+                objResMess.setFile(f);
             }
             try {
                 ooutPushMess.writeObject(objResMess);
@@ -297,9 +344,8 @@ public class ServerGUI extends javax.swing.JFrame {
     public ArrayList<ObjectClients> getMess(int groupID) {
         ArrayList<ObjectClients> listMess = new ArrayList<>();
         try {
-            String query = "SELECT * FROM (SELECT TOP(30) * FROM dbo.Message WHERE group_id = "+groupID+" ORDER BY ID DESC) AS s ORDER BY s.ID ASC";
-            Statement stmt = conn.createStatement();
-            ResultSet rs = stmt.executeQuery(query);
+            String query = "SELECT * FROM (SELECT TOP(30) * FROM dbo.Message WHERE group_id = " + groupID + " ORDER BY ID DESC) AS s ORDER BY s.ID ASC";
+            ResultSet rs = exc(query);
             while (rs.next()) {
                 ObjectClients objMess = new ObjectClients();
                 objMess.setStatus("resMess");
@@ -308,7 +354,12 @@ public class ServerGUI extends javax.swing.JFrame {
                 String sign = Character.toString(mess.charAt(0));
                 objMess.setMessage(mess);
                 if (sign.equals("F") || sign.equals("P")) {
-                    byte[] f = readBytesFromFile(mess.substring(1));
+                    //String filePath = mess.in
+                    int index = mess.indexOf(95, 0);
+                    String filePath = mess.substring(index + 1);
+                    String fileName = mess.substring(0, index);
+                    objMess.setMessage(fileName);
+                    byte[] f = readBytesFromFile(filePath);
                     objMess.setFile(f);
                 }
                 listMess.add(objMess);
@@ -357,8 +408,7 @@ public class ServerGUI extends javax.swing.JFrame {
                 + "UNION ALL "
                 + "SELECT ID FROM dbo.[GROUP] WHERE user_1 = '" + user_2 + "' AND user_2 = '" + user_1 + "'";
         try {
-            Statement stmt = conn.createStatement();
-            ResultSet rs = stmt.executeQuery(query);
+            ResultSet rs = exc(query);
             if (rs.next()) {
                 return rs.getInt("ID");
             }
@@ -723,16 +773,13 @@ public class ServerGUI extends javax.swing.JFrame {
                 int selectedRowIndex = table_clientsManagenment.getSelectedRow();
                 String userName = table_clientsManagenment.getValueAt(selectedRowIndex, 1).toString();
                 String query = "DELETE FROM dbo.[USER] WHERE userName = '" + userName + "'";
-                try {
-                    Statement stm = conn.createStatement();
-                    stm.execute(query);
-                    JOptionPane.showMessageDialog(null, userName + " was Deleted!");
-                    loadClients(conn);
-                    File f = new File("F:\\HOCTAP\\Lap trinh ung dung mang\\ChatAppServer\\AvatarClients\\" + userName + ".png");
-                    f.delete();
-                } catch (SQLException ex) {
-                    JOptionPane.showMessageDialog(null, ex);
-                }
+
+                exc(query);
+                JOptionPane.showMessageDialog(null, userName + " was Deleted!");
+                loadClients(conn);
+                File f = new File("F:\\HOCTAP\\Lap trinh ung dung mang\\ChatAppServer\\AvatarClients\\" + userName + ".png");
+                f.delete();
+
             }
 
         } else {
@@ -745,8 +792,7 @@ public class ServerGUI extends javax.swing.JFrame {
         String query = "SELECT * FROM dbo.[USER] WHERE userName = '" + userName + "' AND passWord = '" + passWord + "'";
         String queryOnline = "UPDATE dbo.[USER] SET status = 1 WHERE userName = '" + userName + "'";
         try {
-            Statement stm = conn.createStatement();
-            ResultSet rs = stm.executeQuery(query);
+            ResultSet rs = exc(query);
             Statement stmUpdate = conn.createStatement();
             stmUpdate.execute(queryOnline);
             if (!rs.next()) {
@@ -773,8 +819,8 @@ public class ServerGUI extends javax.swing.JFrame {
         try {
             String query = "SELECT * FROM dbo.[USER] WHERE active <> 0 AND userName = ANY (SELECT user_2 FROM dbo.[GROUP] WHERE user_1 = '" + userName + "') UNION ALL "
                     + "SELECT * FROM dbo.[USER] WHERE active <> 0 AND userName = ANY (SELECT user_1 FROM dbo.[GROUP] WHERE user_2 = '" + userName + "')";
-            Statement stm = conn.createStatement();
-            ResultSet rs = stm.executeQuery(query);
+
+            ResultSet rs = exc(query);
             while (rs.next()) {
                 ObjectClients objFriends = new ObjectClients();
                 objFriends.setStatus("friend");
@@ -798,14 +844,9 @@ public class ServerGUI extends javax.swing.JFrame {
 
     //Xử lý bắt buộc cho tất cả client offline khi server tắt
     public void clientOffline(String userName) {
-        try {
-            String queryOffline = "UPDATE dbo.[USER] SET status = 0 WHERE userName = '" + userName + "'";
-            Statement stm = conn.createStatement();
-            stm.execute(queryOffline);
-            listClientsOutputStream.remove(userName);
-        } catch (SQLException ex) {
-            Logger.getLogger(ServerGUI.class.getName()).log(Level.SEVERE, null, ex);
-        }
+        String queryOffline = "UPDATE dbo.[USER] SET status = 0 WHERE userName = '" + userName + "'";
+        exc(queryOffline);
+        listClientsOutputStream.remove(userName);
     }
 
     //nói cho tất cả bạn bè của userName về status của user mỗi khi online/offline
@@ -849,8 +890,7 @@ public class ServerGUI extends javax.swing.JFrame {
             String query = "SELECT * FROM dbo.[USER] WHERE status  <> 0 AND active <> 0 AND userName = ANY (SELECT user_2 FROM dbo.[GROUP] WHERE user_1 = '" + userName + "')"
                     + "UNION ALL "
                     + "SELECT * FROM dbo.[USER] WHERE status  <> 0 AND active <> 0 AND userName = ANY (SELECT user_1 FROM dbo.[GROUP] WHERE user_2 = '" + userName + "')";
-            Statement stm = conn.createStatement();
-            ResultSet rs = stm.executeQuery(query);
+            ResultSet rs = exc(query);
             while (rs.next()) {
                 ObjectClients objFriendOnline = new ObjectClients();
                 listFriendsOnline.add(rs.getString("userName").trim());
@@ -865,8 +905,8 @@ public class ServerGUI extends javax.swing.JFrame {
     public boolean checkUserIsAvirable(String userName) {
         try {
             String query = "SELECT * FROM dbo.[USER] WHERE userName = '" + userName + "'";
-            Statement stm = conn.createStatement();
-            ResultSet rs = stm.executeQuery(query);
+
+            ResultSet rs = exc(query);
             if (!rs.next()) {
                 return false;
             }
@@ -881,8 +921,7 @@ public class ServerGUI extends javax.swing.JFrame {
         try {
             String query = "SELECT * FROM dbo.[GROUP] WHERE user_1 = '" + friend_userName + "' AND user_2 = '" + your_userName + "' "
                     + "UNION ALL SELECT * FROM dbo.[GROUP] WHERE user_1 = '" + your_userName + "' AND user_2 = '" + friend_userName + "'";
-            Statement stm = conn.createStatement();
-            ResultSet rs = stm.executeQuery(query);
+            ResultSet rs = exc(query);
             if (!rs.next()) {
                 return false;
             }
@@ -896,8 +935,7 @@ public class ServerGUI extends javax.swing.JFrame {
         ObjectClients client = new ObjectClients();
         try {
             String query = "SELECT * FROM dbo.[USER] WHERE userName = '" + userName + "'";
-            Statement stm = conn.createStatement();
-            ResultSet rs = stm.executeQuery(query);
+            ResultSet rs = exc(query);
             if (rs.next()) {
                 ImageIcon imgIcon = new ImageIcon(rs.getString("avatar"));
                 client.setAvatar(imgIcon);
@@ -922,14 +960,9 @@ public class ServerGUI extends javax.swing.JFrame {
         if (!checkUserIsAvirable(friend_userName) || checkIsFriend(friend_userName, your_userName)) {
             return false;
         } else {
-            try {
-                String query = "INSERT INTO dbo.[GROUP] ( user_1, user_2 ) VALUES  ( N'" + your_userName + "',  N'" + friend_userName + "')";
-                Statement stm = conn.createStatement();
-                stm.execute(query);
-                txt_serverLog.append("\n" + your_userName + " and " + friend_userName + " became friends");
-            } catch (SQLException ex) {
-                ex.printStackTrace();
-            }
+            String query = "INSERT INTO dbo.[GROUP] ( user_1, user_2 ) VALUES  ( N'" + your_userName + "',  N'" + friend_userName + "')";
+            exc(query);
+            txt_serverLog.append("\n" + your_userName + " and " + friend_userName + " became friends");
 
         }
         return true;
@@ -944,8 +977,7 @@ public class ServerGUI extends javax.swing.JFrame {
         clearTable();
         int STT = 0;
         try {
-            Statement stmt = conn.createStatement();
-            ResultSet rs = stmt.executeQuery("Select * from dbo.[USER]");
+            ResultSet rs = exc("Select * from dbo.[USER]");
             while (rs.next()) {
                 STT++;
                 String usrName = rs.getString("userName").trim();
@@ -963,12 +995,7 @@ public class ServerGUI extends javax.swing.JFrame {
 
     public void makeAllClientOffline() {
         String query = "UPDATE dbo.[USER] SET status = 0 ";
-        try {
-            Statement stm = conn.createStatement();
-            stm.execute(query);
-        } catch (SQLException ex) {
-            Logger.getLogger(ServerGUI.class.getName()).log(Level.SEVERE, null, ex);
-        }
+        exc(query);
     }
 
     public static void main(String args[]) {
