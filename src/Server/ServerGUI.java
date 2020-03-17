@@ -53,6 +53,9 @@ public class ServerGUI extends javax.swing.JFrame {
     private ServerSocket svSocket = null;
     private final int ports = 14049;
 
+    private int currentUser = 0;
+    private int totalUsers = 0;
+
     //Lưu luồng ra của từng client kết nối tới
     HashMap<String, ObjectOutputStream> listClientsOutputStream = null;
 
@@ -86,19 +89,18 @@ public class ServerGUI extends javax.swing.JFrame {
                     String query = "";
                     String notificaiton = "";
                     if (checked) {
-                        query = "UPDATE dbo.[USER] SET status = 1 WHERE userName = '" + userName + "'";
+                        query = "UPDATE dbo.[USER] SET active = 1 WHERE userName = '" + userName + "'";
                         notificaiton = userName + " is active!";
                     } else {
-                        query = "UPDATE dbo.[USER] SET status = 0 WHERE userName = '" + userName + "'";
+                        query = "UPDATE dbo.[USER] SET active = 0 WHERE userName = '" + userName + "'";
                         notificaiton = userName + " is disable!";
+                        forcedStopClient(userName.trim());
+                        currentUser--;
+                        updateUserNums();
                     }
-                    try {
-                        Statement stm = conn.createStatement();
-                        stm.execute(query);
-                        JOptionPane.showMessageDialog(null, notificaiton);
-                    } catch (SQLException ex) {
-                        JOptionPane.showMessageDialog(null, ex);
-                    }
+
+                    exc(query);
+                    JOptionPane.showMessageDialog(null, notificaiton);
 
                 }
             }
@@ -186,22 +188,21 @@ public class ServerGUI extends javax.swing.JFrame {
                             break;
                         }
                         case "login": {
-                            boolean rs = checkLogin(oout, userNameSend, objClient.getPassWord());
+                            String rs = checkLogin(oout, userNameSend, objClient.getPassWord());
                             ObjectClients repLogin = new ObjectClients();
-                            if (rs) {
-                                txt_serverLog.append("\n" + userNameSend + " login success!!!");
-                                listClientsOutputStream.put(userNameSend, this.oout);
-                                repLogin.setStatus("resLogin");
-                                repLogin.setMessage("success");
-                            } else {
-                                repLogin.setStatus("resLogin");
-                                repLogin.setMessage("fail");
-                            }
+                            repLogin.setStatus("resLogin");
+                            repLogin.setMessage(rs);
                             oout.writeObject(repLogin);
+                            oout.flush();
+
                             // Cải thiện tốc độ login cho client
                             // Thay vì chờ nói hết cho mọi người rằng tôi online thì
                             // Hiện login cho client trước còn phía server sẽ tự thông báo cho mọi người sau
-                            if (rs) {
+                            if (rs.equals("success")) {
+                                listClientsOutputStream.put(userNameSend, this.oout);
+                                loadClients(conn);
+                                currentUser++;
+                                updateUserNums();
                                 TellEveryOneMyStatus(userNameSend, "Online");
                             }
                             break;
@@ -254,6 +255,8 @@ public class ServerGUI extends javax.swing.JFrame {
             } catch (IOException | ClassNotFoundException ex) {
                 try {
                     TellEveryOneMyStatus(objClient.getUserNameSend(), "Offline");
+                    currentUser--;
+                    updateUserNums();
                     try {
                         Thread.sleep(3000);
                     } catch (InterruptedException ex1) {
@@ -268,6 +271,24 @@ public class ServerGUI extends javax.swing.JFrame {
             }
         }
 
+    }
+
+    public void forcedStopClient(String userName) {
+        ObjectClients objStopPkg = new ObjectClients();
+        objStopPkg.setStatus("stop");
+        ObjectOutputStream objOut = listClientsOutputStream.get(userName);
+        try {
+            objOut.writeObject(objStopPkg);
+            listClientsOutputStream.remove(userName);
+        } catch (IOException ex) {
+            Logger.getLogger(ServerGUI.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    public void updateUserNums() {
+        label_totalUsers.setText(String.valueOf(this.currentUser) + "/" + String.valueOf(this.totalUsers));
+        label_totalUsers.validate();
+        label_totalUsers.repaint();
     }
 
     public ResultSet exc(String query) {
@@ -773,13 +794,12 @@ public class ServerGUI extends javax.swing.JFrame {
                 int selectedRowIndex = table_clientsManagenment.getSelectedRow();
                 String userName = table_clientsManagenment.getValueAt(selectedRowIndex, 1).toString();
                 String query = "DELETE FROM dbo.[USER] WHERE userName = '" + userName + "'";
-
                 exc(query);
                 JOptionPane.showMessageDialog(null, userName + " was Deleted!");
-                loadClients(conn);
                 File f = new File("F:\\HOCTAP\\Lap trinh ung dung mang\\ChatAppServer\\AvatarClients\\" + userName + ".png");
                 f.delete();
-
+                exc("DELETE FROM dbo.[GROUP] WHERE user_1 = '"+userName+"' OR user_2 = '"+userName+"'");
+                loadClients(conn);
             }
 
         } else {
@@ -788,30 +808,47 @@ public class ServerGUI extends javax.swing.JFrame {
     }//GEN-LAST:event_label_deleteMouseClicked
 
     //Xử lý client login
-    public boolean checkLogin(ObjectOutputStream oos, String userName, String passWord) {
-        String query = "SELECT * FROM dbo.[USER] WHERE userName = '" + userName + "' AND passWord = '" + passWord + "'";
+    public String checkLogin(ObjectOutputStream oos, String userName, String passWord) {
+        String query = "SELECT * FROM dbo.[USER] WHERE userName = '" + userName + "'";
         String queryOnline = "UPDATE dbo.[USER] SET status = 1 WHERE userName = '" + userName + "'";
         try {
             ResultSet rs = exc(query);
-            Statement stmUpdate = conn.createStatement();
-            stmUpdate.execute(queryOnline);
             if (!rs.next()) {
-                return false;
+                return "Username or Password wrong, Please try again!";
             } else {
+                String urName = rs.getString("userName").trim();
+                String pwd = rs.getString("passWord").trim();
+                boolean active = rs.getBoolean("active");
+                boolean status = rs.getBoolean("status");
+
+                if (!passWord.equals(pwd)) {
+                    return "Username or Password wrong, Please try again!";
+                }
+                if (!active) {
+                    return "The User is Inactive!";
+                }
+                if (status) {
+                    return "The User has logged elsewhere!";
+                }
                 ImageIcon imgIcon = new ImageIcon(rs.getString("avatar"));
                 ObjectClients objProfile = new ObjectClients("profile", "", "", rs.getString("name"), imgIcon);
                 oos.writeObject(objProfile);
+                oos.flush();
                 try {
-                    Thread.sleep(1000);
+                    Thread.sleep(500);
                 } catch (InterruptedException ex) {
                     Logger.getLogger(ServerGUI.class.getName()).log(Level.SEVERE, null, ex);
                 }
-                pushFriends(oos, rs.getString("userName"));
+                
+                pushFriends(oos, urName);
+                exc(queryOnline);
+                return "success";
+
             }
         } catch (SQLException | IOException ex) {
             ex.printStackTrace();
         }
-        return true;
+        return "Error login!";
     }
 
     //Gửi danh sách friends cho userName
@@ -931,6 +968,7 @@ public class ServerGUI extends javax.swing.JFrame {
         return true;
     }
 
+    //Lấy info client
     public ObjectClients getInfoClient(String userName, String status) {
         ObjectClients client = new ObjectClients();
         try {
@@ -956,6 +994,7 @@ public class ServerGUI extends javax.swing.JFrame {
         return client;
     }
 
+    //Thêm mới bạn
     public boolean addNewFriends(String your_userName, String friend_userName) {
         if (!checkUserIsAvirable(friend_userName) || checkIsFriend(friend_userName, your_userName)) {
             return false;
@@ -985,8 +1024,9 @@ public class ServerGUI extends javax.swing.JFrame {
                 Boolean status = rs.getBoolean("active");
                 DefaultTableModel Model = (DefaultTableModel) this.table_clientsManagenment.getModel();
                 Model.addRow(new Object[]{STT, usrName, fullName, status});
-
             }
+            this.totalUsers = STT;
+            updateUserNums();
             this.txt_serverLog.append("\nLoading Clients Infomation successfully!");
         } catch (SQLException ex) {
             ex.printStackTrace();
